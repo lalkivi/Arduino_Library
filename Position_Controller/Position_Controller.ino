@@ -20,7 +20,7 @@ float pwmOutput = 0;          // PWM output for motor (-255 to 255)
 
 // PID variables for position controller
 float desiredPosition = 180.0; // Desired position in degrees
-float Kp_position = 2.0;       // Proportional gain for position
+float Kp_position = 12.5;       // Proportional gain for position
 float Ki_position = 0.0;       // Integral gain for position
 float Kd_position = 0.1;       // Derivative gain for position
 float integral_position = 0.0; // Integral term for position
@@ -33,7 +33,7 @@ float deltaTime = 0;
 
 // Filtering variables
 float filteredCurrent = 0.0; // Filtered current value
-float alpha = 0.0;           // Smoothing factor (0 < alpha <= 1)
+float alpha = 0.1;           // Smoothing factor (0 < alpha <= 1) 
 
 // Encoder variables
 float previousAngle = 0.0; // Previous angle from the encoder
@@ -83,19 +83,14 @@ float readEncoderAngle() {
 
   // Handle wrap-around logic
   if (currentAngle < previousAngle - 180) {
-    // If the angle jumps from ~360 to ~0
     totalAngle += (360 + currentAngle - previousAngle);
   } else if (currentAngle > previousAngle + 180) {
-    // If the angle jumps from ~0 to ~360
     totalAngle -= (360 - currentAngle + previousAngle);
   } else {
-    // Normal increment
     totalAngle += (currentAngle - previousAngle);
   }
 
-  // Update the previous angle
   previousAngle = currentAngle;
-
   return totalAngle; // Return the wrapped angle
 }
 
@@ -117,6 +112,7 @@ void loop() {
   // Outer loop: Position control (PID)
   float positionError = desiredPosition - currentPosition;
   integral_position += positionError * deltaTime;
+  integral_position = constrain(integral_position, -100, 100); // Anti-windup for position integral
   float derivative_position = (positionError - previousPositionError) / deltaTime;
   previousPositionError = positionError;
 
@@ -124,26 +120,29 @@ void loop() {
   desiredCurrent = Kp_position * positionError + Ki_position * integral_position + Kd_position * derivative_position;
 
   // Inner loop: Current control (PI)
-  float currentError = abs(desiredCurrent - filteredCurrent);
+  float currentError = desiredCurrent - filteredCurrent;
   integral_current += currentError * deltaTime;
+  integral_current = constrain(integral_current, -100, 100); // Anti-windup for current integral
 
   // Calculate PWM output for motor
   pwmOutput = Kp_current * currentError + Ki_current * integral_current;
+  pwmOutput = constrain(pwmOutput, -255, 255); // Constrain PWM output to valid range
 
-  // Constrain PWM output to valid range
-  pwmOutput = constrain(pwmOutput, -255, 255);
+  // Small deadband to prevent small drift
+  if (abs(pwmOutput) < 5) {
+    pwmOutput = 0;
+  }
 
   // Apply PWM and direction control
   if (pwmOutput > 0) {
     digitalWrite(in1, HIGH);
     digitalWrite(in2, LOW);
-    analogWrite(enA, pwmOutput); // Apply positive PWM
+    analogWrite(enA, pwmOutput); 
   } else if (pwmOutput < 0) {
     digitalWrite(in1, LOW);
     digitalWrite(in2, HIGH);
-    analogWrite(enA, -pwmOutput); // Apply the absolute value of negative PWM
+    analogWrite(enA, -pwmOutput); 
   } else {
-    // Stop the motor
     digitalWrite(in1, LOW);
     digitalWrite(in2, LOW);
     analogWrite(enA, 0);
@@ -161,45 +160,28 @@ void loop() {
   Serial.print(" mA | PWM Output: ");
   Serial.println(pwmOutput);
 
-  // Check for Serial input to tune gains
-  if (Serial.available() > 0) {
-    handleSerialInput();
-  }
-
-  // Small delay to stabilize readings
   delay(20);
 }
 
 void handleSerialInput() {
-  String input = Serial.readStringUntil('\n'); // Read input until newline
-  input.trim(); // Remove whitespace and newline
-
-  if (input.startsWith("P ")) { // Set Kp for position
+  String input = Serial.readStringUntil('\n');
+  input.trim();
+  if (input.startsWith("P ")) {
     Kp_position = input.substring(2).toFloat();
-    Serial.print("Updated Kp_position: ");
-    Serial.println(Kp_position);
-  } else if (input.startsWith("I ")) { // Set Ki for position
+  } else if (input.startsWith("I ")) {
     Ki_position = input.substring(2).toFloat();
-    Serial.print("Updated Ki_position: ");
-    Serial.println(Ki_position);
-  } else if (input.startsWith("D ")) { // Set Kd for position
+  } else if (input.startsWith("D ")) {
     Kd_position = input.substring(2).toFloat();
-    Serial.print("Updated Kd_position: ");
-    Serial.println(Kd_position);
-  } else if (input.startsWith("CP ")) { // Set Kp for current
+  } else if (input.startsWith("CP ")) {
     Kp_current = input.substring(3).toFloat();
-    Serial.print("Updated Kp_current: ");
-    Serial.println(Kp_current);
-  } else if (input.startsWith("CI ")) { // Set Ki for current
+  } else if (input.startsWith("CI ")) {
     Ki_current = input.substring(3).toFloat();
-    Serial.print("Updated Ki_current: ");
-    Serial.println(Ki_current);
   } else {
     Serial.println("Invalid command. Use:");
-    Serial.println("P <value> - Set Kp_position");
-    Serial.println("I <value> - Set Ki_position");
-    Serial.println("D <value> - Set Kd_position");
-    Serial.println("CP <value> - Set Kp_current");
-    Serial.println("CI <value> - Set Ki_current");
+    Serial.println("P <value>");
+    Serial.println("I <value>");
+    Serial.println("D <value>");
+    Serial.println("CP <value>");
+    Serial.println("CI <value>");
   }
 }
